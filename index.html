@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Project 2 — Flow Field Density Mask</title>
+  <title>Project 2 — Flow Field Density Mask A4</title>
 
   <!-- iOS fullscreen -->
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -58,7 +58,7 @@
 <script>
 /* === Print Config === */
 const PRINT_W = 2480, PRINT_H = 3508;  // A4 @ 300 dpi
-const SCL = 20, STEP_SPEED = 3, LINE_LEN = 1000, LINE_COUNT = 2500;
+const SCL = 20, STEP_SPEED = 3, LINE_LEN = 1000, LINE_COUNT = 5000; // doubled
 const NOISE_INC = 0.005, Z_INC = 0.001;
 const PALETTE = [[0,102,255],[255,30,30],[255,220,0]];
 
@@ -108,7 +108,8 @@ function drawPosterized(src, w, h, thresh) {
       let idx = 4 * (sx + sy * src.width);
       let r=src.pixels[idx], g=src.pixels[idx+1], b=src.pixels[idx+2];
       let lum=(0.299*r+0.587*g+0.114*b)/255*100;
-      let v=(lum>thresh)?255:0;
+      let density = map(lum, thresh, 100, 1.0, 0.0, true);
+      let v = density*255;
       let di=4*(x+y*w);
       pixels[di]=pixels[di+1]=pixels[di+2]=v; pixels[di+3]=255;
     }
@@ -129,9 +130,10 @@ async function generateHighRes() {
       let idx = 4*(sx+sy*video.width);
       let r=video.pixels[idx], g=video.pixels[idx+1], b=video.pixels[idx+2];
       let lum=(0.299*r+0.587*g+0.114*b)/255*100;
-      // Grey density logic
-      let density = map(lum, 0, 100, 1.0, 0.0); 
-      let v = density; // store density as "alpha"
+      let density = map(lum, thresholdVal, 100, 1.0, 0.0, true);
+      if (density < 0) density = 0;
+      if (density > 1) density = 1;
+      let v = density;
       let di=4*(x+y*PRINT_W);
       gfx.pixels[di]=gfx.pixels[di+1]=gfx.pixels[di+2]=v*255;
       gfx.pixels[di+3]=255;
