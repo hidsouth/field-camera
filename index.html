@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Camera Test (Contain)</title>
+  <title>Camera Test (Fixed Aspect)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
     html, body { margin:0; padding:0; height:100%; background:black; }
@@ -35,24 +35,24 @@ function setup() {
 
 function startCamera() {
   video = createCapture({ video: { facingMode: facingMode }, audio: false });
-  video.elt.setAttribute("playsinline", ""); // important for iOS Safari
-  video.size(640, 480);
+  video.elt.setAttribute("playsinline", ""); // iOS Safari requirement
   video.hide();
 }
 
 function draw() {
   background(0);
-  if (video && video.loadedmetadata) {
-    // Keep aspect ratio, fit inside canvas with letterboxing
-    let camRatio = video.width / video.height;
+  if (video && video.elt.readyState >= 2) { // make sure video has data
+    let camW = video.elt.videoWidth;
+    let camH = video.elt.videoHeight;
+    let camRatio = camW / camH;
     let canvasRatio = width / height;
     let drawW, drawH;
     if (camRatio > canvasRatio) {
-      // video is wider than canvas → fit width
+      // camera wider than canvas → fit width
       drawW = width;
       drawH = width / camRatio;
     } else {
-      // video is taller → fit height
+      // camera taller than canvas → fit height
       drawH = height;
       drawW = height * camRatio;
     }
