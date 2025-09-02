@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Project 2 — Flow Field Fixed Preview</title>
+  <title>Project 2 — Flow Field Bracketed Hi-Res</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
     html, body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; }
@@ -63,7 +63,7 @@ const PRINT_W = 2480, PRINT_H = 3508;
 const LINE_COUNT_HIRES = 5000, LINE_LEN_HIRES = 400;
 
 /* Preview Config */
-const PREVIEW_COUNT = 400; // fixed density
+const PREVIEW_COUNT = 400;
 const LINE_LEN_PREVIEW = 120;
 
 const SCL = 20, STEP_SPEED = 2, NOISE_INC = 0.005;
@@ -75,7 +75,7 @@ let badgeEl, hasRender=false, gfx=null, bwMode=true;
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
-  frameRate(30); // lock preview frame rate
+  frameRate(30);
 
   startCamera();
   badgeEl = document.getElementById("badge");
@@ -154,17 +154,57 @@ function draw() {
   for(let i=0;i<PREVIEW_COUNT;i++){let L=new FlowLine();L.complete();L.drawShape();}
 }
 
-/* === Hi-Res Flow Field (unchanged) === */
+/* === Hi-Res Flow Field with Exposure Bracketing === */
 async function generateHighRes(){
-  let gfx=createGraphics(PRINT_W,PRINT_H); gfx.pixelDensity(1); video.loadPixels();
-  let densityMap=new Float32Array(PRINT_W*PRINT_H);
-  for(let y=0;y<PRINT_H;y++){for(let x=0;x<PRINT_W;x++){let sx=int(map(x,0,PRINT_W,0,video.elt.videoWidth-1)),sy=int(map(y,0,PRINT_H,0,video.elt.videoHeight-1));let idx=4*(sx+sy*video.width);if(idx>=video.pixels.length)continue;let r=video.pixels[idx],g=video.pixels[idx+1],b=video.pixels[idx+2];let lum=(0.299*r+0.587*g+0.114*b)/255*100;densityMap[x+y*PRINT_W]=map(lum,thresholdVal,100,1.0,0.0,true);}}
-  let cols=int(PRINT_W/SCL),rows=int(PRINT_H/SCL),flowfield=Array.from({length:cols},()=>Array(rows));let yoff=0;for(let y=0;y<rows;y++){let xoff=0;for(let x=0;x<cols;x++){let angle=noise(xoff,yoff,0)*TWO_PI*2;flowfield[x][y]=p5.Vector.fromAngle(angle).setMag(1);xoff+=NOISE_INC;}yoff+=NOISE_INC;}
-  function densityAt(x,y){return densityMap[int(x)+int(y)*PRINT_W]||0;}
-  function spawn(){for(let tries=0;tries<1000;tries++){let p=createVector(random(PRINT_W),random(PRINT_H));if(random()<densityAt(p.x,p.y))return p;}return createVector(random(PRINT_W),random(PRINT_H));}
-  class FlowLine{constructor(){this.pos=spawn();this.col=bwMode?color(255):color(...PALETTE[int(random(PALETTE.length))]);this.sw=(random(1)<0.7)?1:2;this.pts=[];}stepOnce(){if(this.pts.length>=LINE_LEN_HIRES)return false;let gx=int(constrain(this.pos.x/SCL,0,cols-1)),gy=int(constrain(this.pos.y/SCL,0,rows-1));let f=flowfield[gx][gy].copy().mult(STEP_SPEED);let next=p5.Vector.add(this.pos,f);if(next.x<0||next.x>=PRINT_W||next.y<0||next.y>=PRINT_H)return false;if(random()>densityAt(next.x,next.y))return false;this.pos=next;this.pts.push(this.pos.copy());return true;}complete(){let guard=0;while(this.pts.length<LINE_LEN_HIRES&&guard<LINE_LEN_HIRES*2){if(!this.stepOnce())break;guard++;}}drawShape(){if(this.pts.length<2)return;gfx.noFill();gfx.stroke(this.col);gfx.strokeWeight(this.sw);gfx.beginShape();for(const p of this.pts)gfx.vertex(p.x,p.y);gfx.endShape();}}
-  gfx.background(0);for(let i=0;i<LINE_COUNT_HIRES;i++){let L=new FlowLine();L.complete();L.drawShape();}return gfx;
+  let gfx=createGraphics(PRINT_W,PRINT_H); gfx.pixelDensity(1);
+  video.loadPixels();
+
+  let thresholds = [thresholdVal, thresholdVal-20, thresholdVal+20];
+  let perPass = int(LINE_COUNT_HIRES / thresholds.length);
+
+  thresholds.forEach(t => {
+    let densityMap=new Float32Array(PRINT_W*PRINT_H);
+    for(let y=0;y<PRINT_H;y++){
+      for(let x=0;x<PRINT_W;x++){
+        let sx=int(map(x,0,PRINT_W,0,video.elt.videoWidth-1));
+        let sy=int(map(y,0,PRINT_H,0,video.elt.videoHeight-1));
+        let idx=4*(sx+sy*video.width);
+        if(idx>=video.pixels.length) continue;
+        let r=video.pixels[idx],g=video.pixels[idx+1],b=video.pixels[idx+2];
+        let lum=(0.299*r+0.587*g+0.114*b)/255*100;
+        densityMap[x+y*PRINT_W]=map(lum,t,100,1.0,0.0,true);
+      }
+    }
+
+    let cols=int(PRINT_W/SCL),rows=int(PRINT_H/SCL);
+    let flowfield=Array.from({length:cols},()=>Array(rows));
+    let yoff=0;
+    for(let y=0;y<rows;y++){
+      let xoff=0;
+      for(let x=0;x<cols;x++){
+        let angle=noise(xoff,yoff,0)*TWO_PI*2;
+        flowfield[x][y]=p5.Vector.fromAngle(angle).setMag(1);
+        xoff+=NOISE_INC;
+      }
+      yoff+=NOISE_INC;
+    }
+
+    function densityAt(x,y){return densityMap[int(x)+int(y)*PRINT_W]||0;}
+    function spawn(){for(let tries=0;tries<1000;tries++){let p=createVector(random(PRINT_W),random(PRINT_H));if(random()<densityAt(p.x,p.y))return p;}return createVector(random(PRINT_W),random(PRINT_H));}
+
+    class FlowLine{
+      constructor(){this.pos=spawn();this.col=bwMode?color(255):color(...PALETTE[int(random(PALETTE.length))]);this.sw=(random(1)<0.7)?1:2;this.pts=[];}
+      stepOnce(){if(this.pts.length>=LINE_LEN_HIRES)return false;let gx=int(constrain(this.pos.x/SCL,0,cols-1)),gy=int(constrain(this.pos.y/SCL,0,rows-1));let f=flowfield[gx][gy].copy().mult(STEP_SPEED);let next=p5.Vector.add(this.pos,f);if(next.x<0||next.x>=PRINT_W||next.y<0||next.y>=PRINT_H)return false;if(random()>densityAt(next.x,next.y))return false;this.pos=next;this.pts.push(this.pos.copy());return true;}
+      complete(){let guard=0;while(this.pts.length<LINE_LEN_HIRES&&guard<LINE_LEN_HIRES*2){if(!this.stepOnce())break;guard++;}}
+      drawShape(){if(this.pts.length<2)return;gfx.noFill();gfx.stroke(this.col);gfx.strokeWeight(this.sw);gfx.beginShape();for(const p of this.pts)gfx.vertex(p.x,p.y);gfx.endShape();}
+    }
+
+    for(let i=0;i<perPass;i++){let L=new FlowLine();L.complete();L.drawShape();}
+  });
+
+  return gfx;
 }
+
 function badgeOn(on){badgeEl.style.display=on?"block":"none";}
 </script>
 </body>
