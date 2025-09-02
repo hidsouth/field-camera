@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Project 2 — Flow Field Bracketed Hi-Res</title>
+  <title>Project 2 — Flow Field Bracketed (Fixed)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
     html, body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; }
@@ -154,15 +154,21 @@ function draw() {
   for(let i=0;i<PREVIEW_COUNT;i++){let L=new FlowLine();L.complete();L.drawShape();}
 }
 
-/* === Hi-Res Flow Field with Exposure Bracketing === */
+/* === Hi-Res Flow Field with Corrected Bracketing === */
 async function generateHighRes(){
-  let gfx=createGraphics(PRINT_W,PRINT_H); gfx.pixelDensity(1);
+  let gfx=createGraphics(PRINT_W,PRINT_H); 
+  gfx.pixelDensity(1);
+  gfx.background(0); // force black background
   video.loadPixels();
 
-  let thresholds = [thresholdVal, thresholdVal-20, thresholdVal+20];
+  let thresholds = [
+    {mode:"normal", t1:thresholdVal, t2:100},
+    {mode:"shadow", t1:thresholdVal-20, t2:thresholdVal},
+    {mode:"highlight", t1:thresholdVal, t2:thresholdVal+20}
+  ];
   let perPass = int(LINE_COUNT_HIRES / thresholds.length);
 
-  thresholds.forEach(t => {
+  thresholds.forEach(exp => {
     let densityMap=new Float32Array(PRINT_W*PRINT_H);
     for(let y=0;y<PRINT_H;y++){
       for(let x=0;x<PRINT_W;x++){
@@ -172,7 +178,7 @@ async function generateHighRes(){
         if(idx>=video.pixels.length) continue;
         let r=video.pixels[idx],g=video.pixels[idx+1],b=video.pixels[idx+2];
         let lum=(0.299*r+0.587*g+0.114*b)/255*100;
-        densityMap[x+y*PRINT_W]=map(lum,t,100,1.0,0.0,true);
+        densityMap[x+y*PRINT_W]=map(lum,exp.t1,exp.t2,1.0,0.0,true);
       }
     }
 
