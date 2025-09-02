@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Project 2 — Flow Field Optimized</title>
+  <title>Project 2 — Flow Field Fixed Preview</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
     html, body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; }
@@ -58,11 +58,12 @@
   <div id="badge">Generating Hi-Res…</div>
 
 <script>
+/* Print Config */
 const PRINT_W = 2480, PRINT_H = 3508;
 const LINE_COUNT_HIRES = 5000, LINE_LEN_HIRES = 400;
 
-/* Preview lighter */
-const PREVIEW_COUNT = 300;
+/* Preview Config */
+const PREVIEW_COUNT = 400; // fixed density
 const LINE_LEN_PREVIEW = 120;
 
 const SCL = 20, STEP_SPEED = 2, NOISE_INC = 0.005;
@@ -70,14 +71,17 @@ const PALETTE = [[0,102,255],[255,30,30],[255,220,0]];
 
 let video, facingMode="environment", thresholdVal=60;
 let badgeEl, hasRender=false, gfx=null, bwMode=true;
-let frameCounter=0;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
+  frameRate(30); // lock preview frame rate
+
   startCamera();
   badgeEl = document.getElementById("badge");
+
   document.getElementById("thresholdSlider").oninput = e => thresholdVal = e.target.value;
+
   document.getElementById("captureBtn").onclick = async () => {
     hasRender = false; badgeOn(true);
     gfx = await generateHighRes();
@@ -95,6 +99,7 @@ function setup() {
     if (video) video.remove();
     startCamera();
   };
+
   background(0);
 }
 
@@ -104,19 +109,18 @@ function startCamera(){
   video.hide();
 }
 
-/* === Preview === */
+/* === Preview Flow Field === */
 function draw() {
   if (hasRender) return;
   background(0);
 
   if (!video || video.elt.readyState<2) return;
-  frameCounter++;
-  if (frameCounter%5!==0) return; // update every 5th frame only
-
   video.loadPixels();
+
   let camW=video.elt.videoWidth, camH=video.elt.videoHeight;
   let cols=int(width/SCL), rows=int(height/SCL);
   let flowfield=Array.from({length:cols},()=>Array(rows));
+
   let yoff=0;
   for(let y=0;y<rows;y++){
     let xoff=0;
@@ -150,7 +154,7 @@ function draw() {
   for(let i=0;i<PREVIEW_COUNT;i++){let L=new FlowLine();L.complete();L.drawShape();}
 }
 
-/* === Hi-Res (unchanged) === */
+/* === Hi-Res Flow Field (unchanged) === */
 async function generateHighRes(){
   let gfx=createGraphics(PRINT_W,PRINT_H); gfx.pixelDensity(1); video.loadPixels();
   let densityMap=new Float32Array(PRINT_W*PRINT_H);
