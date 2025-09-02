@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Camera Test</title>
+  <title>Camera Test (Contain)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
     html, body { margin:0; padding:0; height:100%; background:black; }
@@ -35,7 +35,7 @@ function setup() {
 
 function startCamera() {
   video = createCapture({ video: { facingMode: facingMode }, audio: false });
-  video.elt.setAttribute("playsinline", ""); // required for iOS Safari
+  video.elt.setAttribute("playsinline", ""); // important for iOS Safari
   video.size(640, 480);
   video.hide();
 }
@@ -43,18 +43,18 @@ function startCamera() {
 function draw() {
   background(0);
   if (video && video.loadedmetadata) {
-    // Keep aspect ratio, crop to fill
+    // Keep aspect ratio, fit inside canvas with letterboxing
     let camRatio = video.width / video.height;
     let canvasRatio = width / height;
     let drawW, drawH;
     if (camRatio > canvasRatio) {
-      // video wider than canvas → crop sides
-      drawH = height;
-      drawW = camRatio * height;
-    } else {
-      // video taller → crop top/bottom
+      // video is wider than canvas → fit width
       drawW = width;
       drawH = width / camRatio;
+    } else {
+      // video is taller → fit height
+      drawH = height;
+      drawW = height * camRatio;
     }
     image(video, width/2 - drawW/2, height/2 - drawH/2, drawW, drawH);
   } else {
