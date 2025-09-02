@@ -2,67 +2,245 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Camera Test (Fixed Aspect)</title>
+  <title>Project 2 — Portrait Flow Field</title>
+
+  <!-- iOS fullscreen -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Project 2">
+
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
-    html, body { margin:0; padding:0; height:100%; background:black; }
+    html, body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; }
     canvas { display:block; }
+
+    #captureBtn, #clearBtn, #saveBtn, #toggleBtn, #flipBtn {
+      position: fixed; z-index: 10; border: none; cursor: pointer;
+    }
+    #captureBtn {
+      bottom: 30px; left: 50%; transform: translateX(-50%);
+      width: 80px; height: 80px; border-radius: 50%;
+      background: rgba(255,255,255,0.95); border: 6px solid white;
+    }
+    #clearBtn {
+      top: 20px; right: 20px; width: 44px; height: 44px;
+      border-radius: 50%; background: rgba(255,255,255,0.25); border: 2px solid white;
+    }
+    #saveBtn {
+      top: 20px; left: 20px; width: 44px; height: 44px;
+      border-radius: 50%; background: rgba(0,200,0,0.35); border: 2px solid #9cff9c;
+    }
+    #toggleBtn {
+      bottom: 30px; left: 30px; width: 44px; height: 44px;
+      border-radius: 50%; background: rgba(200,200,200,0.35); border: 2px solid white;
+    }
+    #toggleBtn.colorMode { background: yellow; border: 2px solid black; }
     #flipBtn {
-      position: fixed; bottom: 20px; right: 20px;
-      width: 60px; height: 60px; border-radius: 50%;
-      background: rgba(200,200,200,0.6); border: 2px solid white;
-      z-index: 10; cursor: pointer;
+      bottom: 30px; right: 30px; width: 44px; height: 44px;
+      border-radius: 50%; background: rgba(200,200,200,0.35); border: 2px solid white;
+    }
+
+    #sliderWrap {
+      position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+      width: 60%; z-index: 12; text-align: center;
+    }
+    #thresholdSlider { width: 100%; }
+
+    #badge {
+      position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      color: #ddd; font: 14px system-ui, -apple-system, sans-serif;
+      background: rgba(0,0,0,0.6); padding: 10px 14px; border-radius: 8px;
+      z-index: 11; display: none;
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 </head>
 <body>
-  <button id="flipBtn">↺</button>
+  <button id="saveBtn" aria-label="Save"></button>
+  <button id="clearBtn" aria-label="Clear"></button>
+  <button id="captureBtn" aria-label="Capture"></button>
+  <button id="toggleBtn" aria-label="Toggle Color/BW"></button>
+  <button id="flipBtn" aria-label="Flip Camera"></button>
+  <div id="sliderWrap">
+    <input type="range" min="0" max="100" value="60" id="thresholdSlider">
+  </div>
+  <div id="badge">Generating Hi-Res…</div>
+
 <script>
+/* === Print Config === */
+const PRINT_W = 2480, PRINT_H = 3508;
+const LINE_COUNT_HIRES = 5000;
+const LINE_LEN_HIRES = 400;
+
+/* Preview Config */
+let PREVIEW_COUNT;
+const LINE_LEN_PREVIEW = 150;
+
+const SCL = 20, STEP_SPEED = 2;
+const NOISE_INC = 0.005;
+const PALETTE = [[0,102,255],[255,30,30],[255,220,0]];
+
+/* Globals */
 let video, facingMode = "environment";
+let thresholdVal = 60, badgeEl;
+let hasRender = false, gfx = null;
+let bwMode = true;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
+
   startCamera();
 
-  document.getElementById("flipBtn").onclick = () => {
+  badgeEl = document.getElementById('badge');
+  document.getElementById('thresholdSlider').oninput = e => thresholdVal = e.target.value;
+
+  document.getElementById('captureBtn').onclick = async () => {
+    hasRender = false; badgeOn(true);
+    gfx = await generateHighRes();
+    badgeOn(false); hasRender = true;
+  };
+
+  document.getElementById('clearBtn').onclick = () => {
+    hasRender = false; background(0); loop();
+  };
+
+  document.getElementById('saveBtn').onclick = () => {
+    if (gfx) gfx.save("portrait_flowfield.png");
+  };
+
+  document.getElementById('toggleBtn').onclick = () => {
+    bwMode = !bwMode;
+    const btn = document.getElementById('toggleBtn');
+    if (bwMode) btn.classList.remove("colorMode");
+    else btn.classList.add("colorMode");
+  };
+
+  document.getElementById('flipBtn').onclick = () => {
     facingMode = (facingMode === "environment") ? "user" : "environment";
     if (video) video.remove();
     startCamera();
   };
+
+  PREVIEW_COUNT = int(LINE_COUNT_HIRES * (width*height) / (PRINT_W*PRINT_H));
+  background(0);
 }
 
 function startCamera() {
   video = createCapture({ video: { facingMode: facingMode }, audio: false });
-  video.elt.setAttribute("playsinline", ""); // iOS Safari requirement
+  video.elt.setAttribute("playsinline", ""); // important for iOS Safari
   video.hide();
 }
 
+/* === Live Preview Flow Field === */
 function draw() {
+  if (hasRender) return;
   background(0);
-  if (video && video.elt.readyState >= 2) { // make sure video has data
-    let camW = video.elt.videoWidth;
-    let camH = video.elt.videoHeight;
-    let camRatio = camW / camH;
-    let canvasRatio = width / height;
-    let drawW, drawH;
-    if (camRatio > canvasRatio) {
-      // camera wider than canvas → fit width
-      drawW = width;
-      drawH = width / camRatio;
-    } else {
-      // camera taller than canvas → fit height
-      drawH = height;
-      drawW = height * camRatio;
+
+  if (!video || video.elt.readyState < 2) return;
+
+  let camW = video.elt.videoWidth;
+  let camH = video.elt.videoHeight;
+  let cols = int(width / SCL);
+  let rows = int(height / SCL);
+  let flowfield = Array.from({length:cols},()=>Array(rows));
+
+  // Build flow field
+  let yoff = 0;
+  for (let y=0; y<rows; y++) {
+    let xoff=0;
+    for (let x=0; x<cols; x++) {
+      let angle = noise(xoff,yoff,0)*TWO_PI*2;
+      flowfield[x][y] = p5.Vector.fromAngle(angle).setMag(1);
+      xoff += NOISE_INC;
     }
-    image(video, width/2 - drawW/2, height/2 - drawH/2, drawW, drawH);
-  } else {
-    fill(255);
-    textAlign(CENTER, CENTER);
-    text("Waiting for camera…", width/2, height/2);
+    yoff += NOISE_INC;
   }
+
+  function densityAt(x,y){
+    let sx = int(map(x,0,width,0,camW-1));
+    let sy = int(map(y,0,height,0,camH-1));
+    let idx = 4*(sx+sy*video.width);
+    video.loadPixels();
+    if (video.pixels.length === 0) return 0;
+    let r=video.pixels[idx], g=video.pixels[idx+1], b=video.pixels[idx+2];
+    let lum=(0.299*r+0.587*g+0.114*b)/255*100;
+    return map(lum, thresholdVal, 100, 1.0, 0.0, true);
+  }
+
+  function spawn(){
+    for(let tries=0;tries<200;tries++){
+      let p=createVector(random(width),random(height));
+      if(random()<densityAt(p.x,p.y)) return p;
+    }
+    return createVector(random(width),random(height));
+  }
+
+  class FlowLine{
+    constructor(){this.pos=spawn();this.col=bwMode?color(255):color(...PALETTE[int(random(PALETTE.length))]);this.sw=(random(1)<0.7)?1:2;this.pts=[];}
+    stepOnce(){if(this.pts.length>=LINE_LEN_PREVIEW)return false;let gx=int(constrain(this.pos.x/SCL,0,cols-1));let gy=int(constrain(this.pos.y/SCL,0,rows-1));let f=flowfield[gx][gy].copy().mult(STEP_SPEED);let next=p5.Vector.add(this.pos,f);if(next.x<0||next.x>=width||next.y<0||next.y>=height)return false;if(random()>densityAt(next.x,next.y))return false;this.pos=next;this.pts.push(this.pos.copy());return true;}
+    complete(){let guard=0;while(this.pts.length<LINE_LEN_PREVIEW&&guard<LINE_LEN_PREVIEW*2){if(!this.stepOnce())break;guard++;}}
+    drawShape(){if(this.pts.length<2)return;noFill();stroke(this.col);strokeWeight(this.sw);beginShape();for(const p of this.pts)vertex(p.x,p.y);endShape();}
+  }
+
+  for(let i=0;i<PREVIEW_COUNT;i++){let L=new FlowLine();L.complete();L.drawShape();}
 }
+
+/* === Hi-Res Flow Field Generation === */
+async function generateHighRes() {
+  let gfx = createGraphics(PRINT_W, PRINT_H);
+  gfx.pixelDensity(1);
+
+  video.loadPixels();
+  let densityMap = new Float32Array(PRINT_W*PRINT_H);
+
+  for (let y=1;y<PRINT_H-1;y++){
+    for (let x=1;x<PRINT_W-1;x++){
+      let sx = int(map(x,0,PRINT_W,0,video.elt.videoWidth-1));
+      let sy = int(map(y,0,PRINT_H,0,video.elt.videoHeight-1));
+      let idx = 4*(sx+sy*video.width);
+      if (idx >= video.pixels.length) continue;
+      let r=video.pixels[idx], g=video.pixels[idx+1], b=video.pixels[idx+2];
+      let lum=(0.299*r+0.587*g+0.114*b)/255*100;
+      densityMap[x+y*PRINT_W]=map(lum,thresholdVal,100,1.0,0.0,true);
+    }
+  }
+
+  let cols=int(PRINT_W/SCL), rows=int(PRINT_H/SCL);
+  let flowfield=Array.from({length:cols},()=>Array(rows));
+  let yoff=0;
+  for(let y=0;y<rows;y++){
+    let xoff=0;
+    for(let x=0;x<cols;x++){
+      let angle=noise(xoff,yoff,0)*TWO_PI*2;
+      flowfield[x][y]=p5.Vector.fromAngle(angle).setMag(1);
+      xoff+=NOISE_INC;
+    }
+    yoff+=NOISE_INC;
+  }
+
+  function densityAt(x,y){return densityMap[int(x)+int(y)*PRINT_W]||0;}
+  function spawn(){
+    for(let tries=0;tries<1000;tries++){
+      let p=createVector(random(PRINT_W),random(PRINT_H));
+      if(random()<densityAt(p.x,p.y)) return p;
+    }
+    return createVector(random(PRINT_W),random(PRINT_H));
+  }
+
+  class FlowLine{
+    constructor(){this.pos=spawn();this.col=bwMode?color(255):color(...PALETTE[int(random(PALETTE.length))]);this.sw=(random(1)<0.7)?1:2;this.pts=[];}
+    stepOnce(){if(this.pts.length>=LINE_LEN_HIRES)return false;let gx=int(constrain(this.pos.x/SCL,0,cols-1));let gy=int(constrain(this.pos.y/SCL,0,rows-1));let f=flowfield[gx][gy].copy().mult(STEP_SPEED);let next=p5.Vector.add(this.pos,f);if(next.x<0||next.x>=PRINT_W||next.y<0||next.y>=PRINT_H)return false;if(random()>densityAt(next.x,next.y))return false;this.pos=next;this.pts.push(this.pos.copy());return true;}
+    complete(){let guard=0;while(this.pts.length<LINE_LEN_HIRES&&guard<LINE_LEN_HIRES*2){if(!this.stepOnce())break;guard++;}}
+    drawShape(){if(this.pts.length<2)return;gfx.noFill();gfx.stroke(this.col);gfx.strokeWeight(this.sw);gfx.beginShape();for(const p of this.pts)gfx.vertex(p.x,p.y);gfx.endShape();}
+  }
+
+  gfx.background(0);
+  for(let i=0;i<LINE_COUNT_HIRES;i++){let L=new FlowLine();L.complete();L.drawShape();}
+  return gfx;
+}
+
+function badgeOn(on){badgeEl.style.display=on?"block":"none";}
 </script>
 </body>
 </html>
