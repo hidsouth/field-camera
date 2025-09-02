@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Project 2 — A4 Print 300dpi</title>
+  <title>Project 2 — Flow Field Density Mask</title>
 
+  <!-- iOS fullscreen -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Project 2">
@@ -13,7 +14,7 @@
     html, body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; }
     canvas { display:block; }
 
-    #captureBtn, #clearBtn {
+    #captureBtn, #clearBtn, #saveBtn {
       position: fixed; z-index: 10; border: none; cursor: pointer;
     }
     #captureBtn {
@@ -24,6 +25,10 @@
     #clearBtn {
       top: 20px; right: 20px; width: 44px; height: 44px;
       border-radius: 50%; background: rgba(255,255,255,0.25); border: 2px solid white;
+    }
+    #saveBtn {
+      top: 20px; left: 20px; width: 44px; height: 44px;
+      border-radius: 50%; background: rgba(0,200,0,0.35); border: 2px solid #9cff9c;
     }
 
     #sliderWrap {
@@ -42,6 +47,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 </head>
 <body>
+  <button id="saveBtn" aria-label="Save"></button>
   <button id="clearBtn" aria-label="Clear"></button>
   <button id="captureBtn" aria-label="Capture"></button>
   <div id="sliderWrap">
@@ -54,12 +60,11 @@
 const PRINT_W = 2480, PRINT_H = 3508;  // A4 @ 300 dpi
 const SCL = 20, STEP_SPEED = 3, LINE_LEN = 1000, LINE_COUNT = 2500;
 const NOISE_INC = 0.005, Z_INC = 0.001;
-const EDGE_STEP = 4;
 const PALETTE = [[0,102,255],[255,30,30],[255,220,0]];
 
 /* Globals */
 let video, thresholdVal = 60, badgeEl;
-let hasRender = false;
+let hasRender = false, gfx = null;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -73,12 +78,16 @@ function setup() {
 
   document.getElementById('captureBtn').onclick = async () => {
     hasRender = false; badgeOn(true);
-    await generateHighRes();
+    gfx = await generateHighRes();
     badgeOn(false); hasRender = true;
   };
 
   document.getElementById('clearBtn').onclick = () => {
     hasRender = false; background(0); loop();
+  };
+
+  document.getElementById('saveBtn').onclick = () => {
+    if (gfx) gfx.save("project2_A4_density.png");
   };
 
   background(0);
@@ -107,12 +116,11 @@ function drawPosterized(src, w, h, thresh) {
   updatePixels();
 }
 
-/* === High-res generation & save === */
+/* === High-res generation & density === */
 async function generateHighRes() {
   let gfx = createGraphics(PRINT_W, PRINT_H);
   gfx.pixelDensity(1);
 
-  // posterize video into gfx
   video.loadPixels(); gfx.loadPixels();
   for (let y=0;y<PRINT_H;y++){
     for (let x=0;x<PRINT_W;x++){
@@ -121,38 +129,15 @@ async function generateHighRes() {
       let idx = 4*(sx+sy*video.width);
       let r=video.pixels[idx], g=video.pixels[idx+1], b=video.pixels[idx+2];
       let lum=(0.299*r+0.587*g+0.114*b)/255*100;
-      let v=(lum>thresholdVal)?255:0;
+      // Grey density logic
+      let density = map(lum, 0, 100, 1.0, 0.0); 
+      let v = density; // store density as "alpha"
       let di=4*(x+y*PRINT_W);
-      gfx.pixels[di]=gfx.pixels[di+1]=gfx.pixels[di+2]=v; gfx.pixels[di+3]=255;
+      gfx.pixels[di]=gfx.pixels[di+1]=gfx.pixels[di+2]=v*255;
+      gfx.pixels[di+3]=255;
     }
   }
   gfx.updatePixels();
-
-  // build void mask
-  let voidPixels = new Uint8Array(PRINT_W*PRINT_H);
-  let edgePts = [];
-  for(let y=0;y<PRINT_H;y++){
-    let yIdx=y*PRINT_W;
-    for(let x=0;x<PRINT_W;x++){
-      let i=4*(x+y*PRINT_W);
-      voidPixels[yIdx+x]=(gfx.pixels[i]===255)?1:0;
-    }
-  }
-
-  for(let y=1;y<PRINT_H-1;y+=EDGE_STEP){
-    let yIdx=y*PRINT_W;
-    for(let x=1;x<PRINT_W-1;x+=EDGE_STEP){
-      if(voidPixels[yIdx+x]===1){
-        let boundary=false;
-        for(let dy=-1;dy<=1&&!boundary;dy++){
-          for(let dx=-1;dx<=1;dx++){
-            if(voidPixels[(y+dy)*PRINT_W+(x+dx)]===0){boundary=true;break;}
-          }
-        }
-        if(boundary) edgePts.push(createVector(x,y));
-      }
-    }
-  }
 
   // flow field
   let cols=Math.floor(PRINT_W/SCL), rows=Math.floor(PRINT_H/SCL);
@@ -168,29 +153,38 @@ async function generateHighRes() {
     yoff+=NOISE_INC;
   }
 
-  function isInVoid(x,y){return voidPixels[Math.floor(y)*PRINT_W+Math.floor(x)]===1;}
-  function spawnOutside(){let p;do{p=createVector(random(PRINT_W),random(PRINT_H));}while(isInVoid(p.x,p.y));return p;}
-  function spawnNearEdge(){if(edgePts.length===0)return spawnOutside();let e=edgePts[int(random(edgePts.length))];return e.copy();}
-  function spawnBorder(){let side=int(random(4)),p;if(side===0)p=createVector(random(PRINT_W),5);else if(side===1)p=createVector(random(PRINT_W),PRINT_H-5);else if(side===2)p=createVector(5,random(PRINT_H));else p=createVector(PRINT_W-5,random(PRINT_H));if(isInVoid(p.x,p.y))return spawnOutside();return p;}
+  function densityAt(x,y){
+    let ix=int(constrain(x,0,PRINT_W-1));
+    let iy=int(constrain(y,0,PRINT_H-1));
+    let i=4*(ix+iy*PRINT_W);
+    return gfx.pixels[i]/255.0; // 0..1
+  }
+
+  function spawn(){
+    let tries=0;
+    while(tries<1000){
+      let p=createVector(random(PRINT_W),random(PRINT_H));
+      let d=densityAt(p.x,p.y);
+      if (random()<d) return p; // spawn based on density
+      tries++;
+    }
+    return createVector(random(PRINT_W),random(PRINT_H));
+  }
 
   class FlowLine{
-    constructor(mode){if(mode==="nearVoid")this.pos=spawnNearEdge();else if(mode==="border")this.pos=spawnBorder();else this.pos=spawnOutside();const c=PALETTE[int(random(PALETTE.length))];this.col=color(...c);this.sw=(random(1)<0.7)?random(1,3):random(4,7);this.pts=[];}
-    stepOnce(){if(this.pts.length>=LINE_LEN)return false;let gx=int(constrain(this.pos.x/SCL,0,cols-1));let gy=int(constrain(this.pos.y/SCL,0,rows-1));let f=flowfield[gx][gy].copy().mult(STEP_SPEED);let next=p5.Vector.add(this.pos,f);if(next.x<0||next.x>=PRINT_W||next.y<0||next.y>=PRINT_H)return false;if(isInVoid(next.x,next.y))return false;this.pos=next;this.pts.push(this.pos.copy());return true;}
+    constructor(){this.pos=spawn();const c=PALETTE[int(random(PALETTE.length))];this.col=color(...c);this.sw=(random(1)<0.7)?random(1,3):random(4,7);this.pts=[];}
+    stepOnce(){if(this.pts.length>=LINE_LEN)return false;let gx=int(constrain(this.pos.x/SCL,0,cols-1));let gy=int(constrain(this.pos.y/SCL,0,rows-1));let f=flowfield[gx][gy].copy().mult(STEP_SPEED);let next=p5.Vector.add(this.pos,f);if(next.x<0||next.x>=PRINT_W||next.y<0||next.y>=PRINT_H)return false;if(random()>densityAt(next.x,next.y))return false;this.pos=next;this.pts.push(this.pos.copy());return true;}
     complete(){let guard=0;while(this.pts.length<LINE_LEN&&guard<LINE_LEN*2){if(!this.stepOnce())break;guard++;}}
     drawShape(){if(this.pts.length<2)return;gfx.noFill();gfx.stroke(this.col);gfx.strokeWeight(this.sw);gfx.beginShape();for(const p of this.pts)gfx.vertex(p.x,p.y);gfx.endShape();}
   }
 
   // generate lines
-  let lines=[];let n=int(LINE_COUNT*0.5),b=int(LINE_COUNT*0.2),f=LINE_COUNT-n-b;
-  for(let i=0;i<n;i++){let L=new FlowLine("nearVoid");L.complete();lines.push(L);}
-  for(let i=0;i<b;i++){let L=new FlowLine("border");L.complete();lines.push(L);}
-  for(let i=0;i<f;i++){let L=new FlowLine("outside");L.complete();lines.push(L);}
-
+  let lines=[];
+  for(let i=0;i<LINE_COUNT;i++){let L=new FlowLine();L.complete();lines.push(L);}
   gfx.background(0);
   for(const L of lines)L.drawShape();
 
-  // auto-save full A4 PNG
-  gfx.save("project2_A4_300dpi.png");
+  return gfx;
 }
 
 function badgeOn(on){badgeEl.style.display=on?"block":"none";}
