@@ -2,140 +2,67 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Project 2 — Portrait Flow Field</title>
-
-  <!-- iOS fullscreen -->
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Project 2">
-
+  <title>Camera Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
-    html, body { margin:0; padding:0; background:#000; height:100%; overflow:hidden; }
+    html, body { margin:0; padding:0; height:100%; background:black; }
     canvas { display:block; }
-
-    #captureBtn, #clearBtn, #saveBtn, #toggleBtn, #flipBtn {
-      position: fixed; z-index: 10; border: none; cursor: pointer;
-    }
-    #captureBtn {
-      bottom: 30px; left: 50%; transform: translateX(-50%);
-      width: 80px; height: 80px; border-radius: 50%;
-      background: rgba(255,255,255,0.95); border: 6px solid white;
-    }
-    #clearBtn {
-      top: 20px; right: 20px; width: 44px; height: 44px;
-      border-radius: 50%; background: rgba(255,255,255,0.25); border: 2px solid white;
-    }
-    #saveBtn {
-      top: 20px; left: 20px; width: 44px; height: 44px;
-      border-radius: 50%; background: rgba(0,200,0,0.35); border: 2px solid #9cff9c;
-    }
-    #toggleBtn {
-      bottom: 30px; left: 30px; width: 44px; height: 44px;
-      border-radius: 50%; background: rgba(200,200,200,0.35); border: 2px solid white;
-    }
-    #toggleBtn.colorMode { background: yellow; border: 2px solid black; }
     #flipBtn {
-      bottom: 30px; right: 30px; width: 44px; height: 44px;
-      border-radius: 50%; background: rgba(200,200,200,0.35); border: 2px solid white;
-    }
-
-    #sliderWrap {
-      position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
-      width: 60%; z-index: 12; text-align: center;
-    }
-    #thresholdSlider { width: 100%; }
-
-    #badge {
-      position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-      color: #ddd; font: 14px system-ui, -apple-system, sans-serif;
-      background: rgba(0,0,0,0.6); padding: 10px 14px; border-radius: 8px;
-      z-index: 11; display: none;
+      position: fixed; bottom: 20px; right: 20px;
+      width: 60px; height: 60px; border-radius: 50%;
+      background: rgba(200,200,200,0.6); border: 2px solid white;
+      z-index: 10; cursor: pointer;
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
 </head>
 <body>
-  <button id="saveBtn" aria-label="Save"></button>
-  <button id="clearBtn" aria-label="Clear"></button>
-  <button id="captureBtn" aria-label="Capture"></button>
-  <button id="toggleBtn" aria-label="Toggle Color/BW"></button>
-  <button id="flipBtn" aria-label="Flip Camera"></button>
-  <div id="sliderWrap">
-    <input type="range" min="0" max="100" value="60" id="thresholdSlider">
-  </div>
-  <div id="badge">Generating Hi-Res…</div>
-
+  <button id="flipBtn">↺</button>
 <script>
-/* === Print Config === */
-const PRINT_W = 2480, PRINT_H = 3508;
-const LINE_COUNT_HIRES = 5000;
-const LINE_LEN_HIRES = 400;
-
-/* Preview Config */
-let PREVIEW_COUNT;
-const LINE_LEN_PREVIEW = 150;
-
-const SCL = 20, STEP_SPEED = 2;
-const NOISE_INC = 0.005;
-const PALETTE = [[0,102,255],[255,30,30],[255,220,0]];
-
-/* Globals */
 let video, facingMode = "environment";
-let thresholdVal = 60, badgeEl;
-let hasRender = false, gfx = null;
-let bwMode = true;
 
-/* Setup */
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
-
   startCamera();
 
-  badgeEl = document.getElementById('badge');
-  document.getElementById('thresholdSlider').oninput = e => thresholdVal = e.target.value;
-
-  document.getElementById('captureBtn').onclick = async () => {
-    hasRender = false; badgeOn(true);
-    gfx = await generateHighRes();
-    badgeOn(false); hasRender = true;
-  };
-
-  document.getElementById('clearBtn').onclick = () => {
-    hasRender = false; background(0); loop();
-  };
-
-  document.getElementById('saveBtn').onclick = () => {
-    if (gfx) gfx.save("portrait_flowfield.png");
-  };
-
-  document.getElementById('toggleBtn').onclick = () => {
-    bwMode = !bwMode;
-    const btn = document.getElementById('toggleBtn');
-    if (bwMode) btn.classList.remove("colorMode");
-    else btn.classList.add("colorMode");
-  };
-
-  document.getElementById('flipBtn').onclick = () => {
-    // flip between user and environment
+  document.getElementById("flipBtn").onclick = () => {
     facingMode = (facingMode === "environment") ? "user" : "environment";
     if (video) video.remove();
     startCamera();
   };
-
-  PREVIEW_COUNT = int(LINE_COUNT_HIRES * (width*height) / (PRINT_W*PRINT_H));
-  background(0);
 }
 
-/* Start camera with current facing mode */
 function startCamera() {
   video = createCapture({ video: { facingMode: facingMode }, audio: false });
+  video.elt.setAttribute("playsinline", ""); // required for iOS Safari
   video.size(640, 480);
   video.hide();
 }
 
-/* ... keep rest of flow field code (preview + hi-res generation) exactly as in last version ... */
+function draw() {
+  background(0);
+  if (video && video.loadedmetadata) {
+    // Keep aspect ratio, crop to fill
+    let camRatio = video.width / video.height;
+    let canvasRatio = width / height;
+    let drawW, drawH;
+    if (camRatio > canvasRatio) {
+      // video wider than canvas → crop sides
+      drawH = height;
+      drawW = camRatio * height;
+    } else {
+      // video taller → crop top/bottom
+      drawW = width;
+      drawH = width / camRatio;
+    }
+    image(video, width/2 - drawW/2, height/2 - drawH/2, drawW, drawH);
+  } else {
+    fill(255);
+    textAlign(CENTER, CENTER);
+    text("Waiting for camera…", width/2, height/2);
+  }
+}
 </script>
 </body>
 </html>
